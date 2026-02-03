@@ -1,1 +1,772 @@
+import React, { useEffect, useRef, useState } from "react";
 
+/**************************************
+SMI — FULL PAGE VISUAL PREVIEW (CLOUDINARY TAG AUTO-PULL)
+
+Tags:
+- Trips:  smi_trips
+- Latest: smi_latest
+- About:  smi_about
+
+How it works:
+- Auto-pulls images by Cloudinary tag using:
+  https://res.cloudinary.com/<cloud>/image/list/<tag>.json
+- Trips + Latest Photos + About portrait populate automatically
+- Hero is an image “feature moment” with rounded corners
+
+If the status shows ERROR, your Cloudinary “image/list” endpoint may be disabled.
+**************************************/
+
+/********************** THEME **********************/
+const brand = {
+  primary: "#F7C6CF", // blush
+  accent: "#C9A348", // gold
+  subtle: "#FFF8F9",
+  text: "#0B0B0C",
+};
+
+/********************** UTIL **********************/
+function normalizeBullets(list: unknown): string[] {
+  if (!Array.isArray(list)) return [];
+  return list
+    .map((x) => String((x as any) ?? ""))
+    .map((s) => s.replace(/\s*\n+\s*/g, " ").replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+}
+
+/********************** GLOBAL STYLES + REVEAL **********************/
+function GlobalStyles() {
+  return (
+    <style>{`
+      .reveal{opacity:0; transform:translateY(16px); transition:opacity .6s ease, transform .6s ease;}
+      .reveal.in{opacity:1; transform:none;}
+      .hover-zoom img{transition:transform .7s ease;}
+      .hover-zoom:hover img{transform:scale(1.035);}
+      .btn-shadow{box-shadow:0 6px 16px rgba(201,163,72,0.18)}
+
+      /* Editorial hero type */
+      .hero-kicker{letter-spacing:.22em; text-transform:uppercase; font-weight:600; font-size:12px;}
+      .hero-title{letter-spacing:.12em; text-transform:uppercase;}
+      .hero-subtitle{font-style:italic;}
+    `}</style>
+  );
+}
+
+function Reveal({ children, className = "" }: { children: React.ReactNode; className?: string }) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [inView, setInView] = useState(false);
+
+  useEffect(() => {
+    const node = ref.current;
+    if (!node) return;
+
+    const io = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((e) => {
+          if (e.isIntersecting) {
+            setInView(true);
+            io.disconnect();
+          }
+        });
+      },
+      { threshold: 0.12 }
+    );
+
+    io.observe(node);
+    return () => io.disconnect();
+  }, []);
+
+  return (
+    <div ref={ref} className={`reveal ${inView ? "in" : ""} ${className}`}>
+      {children}
+    </div>
+  );
+}
+
+/********************** FALLBACKS **********************/
+const fallbackImg =
+  "data:image/svg+xml;utf8," +
+  encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="900" height="540"><rect width="100%" height="100%" fill="${brand.subtle}"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="${brand.accent}" font-family="Arial" font-size="22">Photo</text></svg>`
+  );
+
+/********************** BASE TRIPS COPY **********************/
+const baseTrips = [
+  { city: "3-Day Weekend Break", days: 3, blurb: "A tight, stylish itinerary you can actually follow." },
+  { city: "4-Day Culture Sprint", days: 4, blurb: "Landmarks, food, and photo stops — paced realistically." },
+  { city: "5-Day Refresh Trip", days: 5, blurb: "More time, more mood: slow mornings + statement nights." },
+];
+
+/********************** STAYS **********************/
+const stays = [
+  {
+    name: "Golden Tulip Bund New Asia",
+    city: "Shanghai",
+    neighborhood: "Hongkou",
+    vibe: "Prime Location",
+    img: "https://media.radissonhotels.net/image/golden-tulip-bund-new-asia-hotel-shanghai/exterior/16256-182606-f85421299_4K.jpg?impolicy=GalleryLightboxFullscreen",
+    stayed: true,
+    link: "https://www.agoda.com/golden-tulip-bund-new-asia/hotel/shanghai-cn.html",
+    priceTier: "$$",
+  },
+  {
+    name: "Home2 Suites by Hilton Beijing West Railway Station",
+    city: "Beijing",
+    neighborhood: "Fengtai",
+    vibe: "Bustling • Close to attractions • Free laundry",
+    img: "https://www.hilton.com/im/en/BJSRSHT/17715147/exterior.jpg?impolicy=crop&cw=5000&ch=3255&gravity=NorthWest&xposition=0&yposition=39&rw=768&rh=500",
+    stayed: false,
+    link: "https://www.agoda.com/home2-suites-by-hilton-beijing-west-railway-station/hotel/beijing-cn.html",
+    priceTier: "$",
+  },
+  {
+    name: "Hotel Mystays Premier Akasaka",
+    city: "Tokyo",
+    neighborhood: "Minato",
+    vibe: "Accessible • Comfortable • Luggage storage",
+    img: "https://ak-d.tripcdn.com/images/1mc6j12000as0ls687C85_W_1280_853_R5.webp?proc=watermark/image_trip1,l_ne,x_16,y_16,w_67,h_16;digimark/t_image,logo_tripbinary;ignoredefaultwm,1A8F",
+    stayed: false,
+    link: "https://us.trip.com/hotels/detail/?hotelId=5732010",
+    priceTier: "$$",
+  },
+];
+
+/********************** TIERS **********************/
+const tierSpec = {
+  plus: {
+    label: "Plus",
+    price: "+ $10",
+    bullets: normalizeBullets(["Curated dining list", "3–5 photo-op spots", "Downloadable Google Map pins"]),
+  },
+  premium: {
+    label: "Premium",
+    price: "+ $25",
+    bullets: normalizeBullets(["1-day personalization", "Email Q&A", "“Local secrets” mini-guide"]),
+  },
+};
+
+/********************** CLOUDINARY (AUTO BY TAG) **********************/
+const CLOUDINARY_CLOUD = "drtosxoyb";
+
+// HERO IMAGE (upload your selected sunset photo to Cloudinary, then paste the secure URL here)
+const HERO_IMAGE_URL = "https://res.cloudinary.com/drtosxoyb/image/upload/v1770017180/b3432ea3-ac49-4eed-91ff-bf9f466a0c2c_p9gsjp.png"; // e.g. https://res.cloudinary.com/drtosxoyb/image/upload/v1234/your_hero.jpg
+const TAG_TRIPS = "smi_trips";
+const TAG_LATEST = "smi_latest";
+const TAG_ABOUT = "smi_about";
+
+const TRIPS_LIMIT = 3;
+const LATEST_LIMIT = 9;
+const ABOUT_LIMIT = 1;
+
+type CloudinaryListItem = {
+  public_id: string;
+  format?: string;
+  version?: number;
+};
+
+const cldOptimize = (url: string) => url.replace("/image/upload/", "/image/upload/f_auto,q_auto/");
+
+function cloudinaryListUrl(cloud: string, tag: string) {
+  return `https://res.cloudinary.com/${cloud}/image/list/${encodeURIComponent(tag)}.json`;
+}
+
+function cloudinaryAssetUrl(cloud: string, item: CloudinaryListItem) {
+  const fmt = item.format || "jpg";
+  const v = item.version ? `v${item.version}/` : "";
+  return `https://res.cloudinary.com/${cloud}/image/upload/${v}${item.public_id}.${fmt}`;
+}
+
+async function fetchCloudinaryTagNewestFirst(cloud: string, tag: string): Promise<string[]> {
+  const res = await fetch(cloudinaryListUrl(cloud, tag), { cache: "no-store" });
+  if (!res.ok) throw new Error(`Cloudinary list fetch failed (${res.status}) for tag ${tag}`);
+
+  const json = (await res.json()) as { resources?: CloudinaryListItem[] };
+  const resources = Array.isArray(json?.resources) ? json.resources : [];
+
+  // newest first by version
+  const sorted = [...resources].sort((a, b) => (b.version || 0) - (a.version || 0));
+  const urls = sorted.map((it) => cldOptimize(cloudinaryAssetUrl(cloud, it)));
+  return Array.from(new Set(urls.filter(Boolean)));
+}
+
+/********************** UI PRIMITIVES **********************/
+const Section = ({
+  id,
+  children,
+  className = "",
+}: {
+  id?: string;
+  children: React.ReactNode;
+  className?: string;
+}) => (
+  <section id={id} className={`max-w-6xl mx-auto px-6 ${className}`}>
+    {children}
+  </section>
+);
+
+const Button = ({
+  children,
+  outline,
+  className = "",
+  style,
+  ...props
+}: React.ButtonHTMLAttributes<HTMLButtonElement> & {
+  outline?: boolean;
+}) => (
+  <button
+    className={`inline-flex items-center justify-center rounded-full h-12 px-6 text-sm font-medium transition ${
+      outline ? "border-2" : ""
+    } ${className}`}
+    style={style}
+    {...props}
+  >
+    {children}
+  </button>
+);
+
+const Card = ({ children, className = "" }: { children: React.ReactNode; className?: string }) => (
+  <div className={`rounded-2xl overflow-hidden bg-white border shadow-sm ${className}`}>{children}</div>
+);
+
+/********************** NAV **********************/
+function EditorialNav() {
+  return (
+    <div id="top" className="sticky top-0 z-30 backdrop-blur bg-white/85 border-b">
+      <Section className="py-4 flex items-center justify-between">
+        <div className="text-[12px] tracking-[0.22em] uppercase font-semibold">STEAL MY ITINERARY</div>
+
+        <nav className="hidden md:flex items-center gap-10 text-[12px] tracking-[0.28em] uppercase text-neutral-700">
+          <a href="#trips" className="hover:underline">
+            TRIPS
+          </a>
+          <a href="#stays" className="hover:underline">
+            STAYS
+          </a>
+          <a href="#services" className="hover:underline">
+            SERVICES
+          </a>
+          <a href="#photos" className="hover:underline">
+            PHOTOS
+          </a>
+          <a href="#about" className="hover:underline">
+            ABOUT
+          </a>
+          <a href="#inquiry" className="hover:underline">
+            INQUIRY
+          </a>
+        </nav>
+
+        <a href="#inquiry" className="shrink-0">
+          <button className="rounded-full px-6 py-3 font-medium" style={{ border: `3px solid ${brand.accent}` }}>
+            Book / Inquire
+          </button>
+        </a>
+      </Section>
+    </div>
+  );
+}
+
+/********************** HERO **********************/
+function EditorialHero({ heroImg }: { heroImg?: string }) {
+  const HERO_BG =
+    heroImg ||
+    "https://images.unsplash.com/photo-1500375592092-40eb2168fd21?q=80&w=2400&auto=format&fit=crop";
+
+  return (
+    <div className="w-full bg-white">
+      <Section className="py-6">
+        <div className="rounded-3xl overflow-hidden" style={{ boxShadow: "0 12px 40px rgba(0,0,0,0.08)" }}>
+          <div className="relative h-[520px] hover-zoom">
+            <img src={HERO_BG} alt="Hero" className="absolute inset-0 w-full h-full object-cover" />
+
+            <div
+              className="absolute inset-0"
+              style={{
+                background:
+                  "linear-gradient(180deg, rgba(0,0,0,0.10) 0%, rgba(0,0,0,0.18) 55%, rgba(0,0,0,0.26) 100%)",
+              }}
+            />
+
+            <div className="relative z-10 h-full flex items-center justify-center text-center px-6">
+              <div>
+                <h1 className="hero-title mt-3 text-[42px] md:text-[58px] font-semibold text-white/95">STEAL MY ITINERARY</h1>
+                <div className="hero-kicker mt-3 text-white/75">35 Countries • Real Itineraries • Lived Experience</div>
+                <p className="hero-subtitle mt-6 text-[14px] md:text-[16px] text-white/80">Explore more. Plan less.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </Section>
+    </div>
+  );
+}
+
+/********************** PRICE + VERSION PICKER **********************/
+const priceForDays = (d: number) => (d <= 3 ? "$9.99" : d === 4 ? "$19.99" : "$29.99");
+
+function ChooseVersion() {
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState<keyof typeof tierSpec>("plus");
+  const order: (keyof typeof tierSpec)[] = ["plus", "premium"];
+
+  return (
+    <div className="relative shrink-0">
+      <div className="flex items-center gap-2">
+        <Button
+          outline
+          style={{ borderColor: brand.accent }}
+          className="leading-tight text-center whitespace-normal"
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          aria-controls="tier-panel"
+          type="button"
+        >
+          <span className="block">Choose Version</span>
+        </Button>
+      </div>
+
+      {open && (
+        <div
+          id="tier-panel"
+          className="mt-2 w-full max-w-[360px] ml-auto rounded-2xl border bg-white shadow-md p-3"
+          style={{ borderColor: brand.accent }}
+        >
+          <div role="radiogroup" aria-label="Itinerary tiers" className="space-y-3 max-h-56 overflow-y-auto pr-1">
+            {order.map((key, i) => {
+              const t = tierSpec[key];
+              const selected = active === key;
+              return (
+                <div key={key}>
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={selected}
+                    onClick={() => setActive(key)}
+                    className="w-full text-left rounded-xl border-2 p-3 focus:outline-none"
+                    style={{ borderColor: brand.accent, backgroundColor: selected ? brand.primary : "#fff" }}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold">{t.label}</span>
+                      <span className="opacity-90 whitespace-nowrap">{t.price}</span>
+                    </div>
+                    <ul className="mt-2 text-sm list-disc pl-5 space-y-1">
+                      {t.bullets.map((b, j) => (
+                        <li key={`${key}-b-${j}`}>{b}</li>
+                      ))}
+                    </ul>
+                  </button>
+                  {i < order.length - 1 && (
+                    <div className="my-2" style={{ borderTop: `1px solid ${brand.accent}`, opacity: 0.55 }} />
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/********************** TRIPS **********************/
+function TripCard({ city, days, img, blurb }: { city: string; days: number; img: string; blurb: string }) {
+  return (
+    <Reveal>
+      <Card className="hover-zoom">
+        {/*
+          Trips images were feeling "blown up".
+          Use a consistent aspect ratio + object-contain so you can actually see the photo.
+          (No aggressive cropping.)
+        */}
+        {/* Balanced fit: fills the card without aggressive zoom */}
+        {/* Fit-to-frame without losing the top of the image */}
+        <div className="w-full overflow-hidden" style={{ width: "323px", height: "200px" }}>
+          <img
+            src={img}
+            alt={city}
+            className="h-full w-full"
+            style={{ objectFit: "cover", objectPosition: "50% 30%" }}
+            loading="lazy"
+          />
+        </div>
+        <div className="p-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-lg font-semibold">{city}</h3>
+            <span className="text-xs rounded-full px-3 py-1 border" style={{ borderColor: brand.accent }}>
+              {days}-day
+            </span>
+          </div>
+          <p className="mt-2 text-neutral-700 text-sm">{blurb}</p>
+          <div className="mt-4 flex items-center justify-between gap-3 flex-wrap">
+            <div className="min-w-[9rem]">
+              <div className="text-xl font-semibold">{priceForDays(days)}</div>
+              <p className="text-xs text-neutral-500">Includes: daily plan • live map links</p>
+            </div>
+            <div className="flex items-center gap-2 flex-nowrap">
+              <ChooseVersion />
+              <Button className="btn-shadow" style={{ backgroundColor: brand.accent, color: "#fff" }} type="button">
+                Buy Now
+              </Button>
+            </div>
+          </div>
+        </div>
+      </Card>
+    </Reveal>
+  );
+}
+
+function TripShowcase({ tripImages }: { tripImages: string[] }) {
+  const merged = baseTrips.map((t, i) => ({ ...t, img: tripImages[i] || fallbackImg }));
+
+  return (
+    <Section id="trips" className="py-12">
+      <Reveal>
+        <h2 className="text-3xl font-semibold mb-6">Shop Proven Itineraries</h2>
+      </Reveal>
+      <div className="grid md:grid-cols-3 gap-6">
+        {merged.map((t) => (
+          <TripCard key={t.city} city={t.city} days={t.days} img={t.img} blurb={t.blurb} />
+        ))}
+      </div>
+      <Reveal>
+        <p className="mt-4 text-sm text-neutral-600">Pricing: 3 days $9.99, 4 days $19.99, 5+ days $29.99.</p>
+      </Reveal>
+    </Section>
+  );
+}
+
+/********************** STAYS **********************/
+function FeaturedStays() {
+  return (
+    <div style={{ background: brand.subtle }}>
+      <Section id="stays" className="py-12">
+        <Reveal>
+          <h2 className="text-3xl font-semibold mb-6">Featured Stays</h2>
+        </Reveal>
+        <div className="grid md:grid-cols-3 gap-6">
+          {stays.map((s) => (
+            <Reveal key={s.name}>
+              <Card className="hover-zoom">
+                <div className="relative">
+                  <div className="h-48 w-full overflow-hidden">
+                    <img src={s.img} alt={s.name} className="h-full w-full object-cover" loading="lazy" />
+                  </div>
+                  {s.stayed && (
+                    <div className="absolute top-3 left-3">
+                      <span className="text-[10px] font-semibold rounded-full px-2.5 py-1" style={{ background: brand.primary, color: brand.text }}>
+                        I stayed here
+                      </span>
+                    </div>
+                  )}
+                </div>
+                <div className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="text-lg font-semibold">{s.name}</h3>
+                      <div className="text-xs text-neutral-600">
+                        {s.city} • {s.neighborhood}
+                      </div>
+                    </div>
+                    <div className="text-xs">{s.priceTier}</div>
+                  </div>
+                  <p className="mt-2 text-neutral-700 text-sm">{s.vibe}</p>
+                  <div className="mt-3 flex justify-end">
+                    <a href={s.link} target="_blank" rel="noreferrer">
+                      <Button className="btn-shadow" style={{ backgroundColor: brand.accent, color: "#fff" }} type="button">
+                        Book here
+                      </Button>
+                    </a>
+                  </div>
+                </div>
+              </Card>
+            </Reveal>
+          ))}
+        </div>
+      </Section>
+    </div>
+  );
+}
+
+/********************** SERVICES **********************/
+function Services() {
+  return (
+    <div style={{ background: brand.subtle }}>
+      <Section id="services" className="py-14">
+        <Reveal>
+          <div className="text-center max-w-3xl mx-auto">
+            <h2 className="text-3xl font-semibold">Custom Travel Design</h2>
+            <p className="mt-2 text-sm italic text-neutral-700">Built from experience, designed to inspire you to see the world even if you have to go it alone.</p>
+          </div>
+        </Reveal>
+
+        <div className="mt-8 grid md:grid-cols-4 gap-6">
+          <Reveal>
+            <Card className="p-6">
+              <h3 className="text-xl font-semibold">The Jumpstart</h3>
+              <p className="text-sm text-neutral-600">Consultation • starting at $150</p>
+              <ul className="mt-3 text-sm list-disc pl-5 space-y-1">
+                <li>60-min strategy call</li>
+                <li>Destination & flow fit</li>
+                <li>Budget & timeframe guidance</li>
+                <li>Follow-up notes + key links</li>
+              </ul>
+              <div className="mt-4">
+                <a href="#inquiry">
+                  <Button className="btn-shadow" style={{ background: brand.accent, color: "#fff" }} type="button">
+                    Let’s Plan Together
+                  </Button>
+                </a>
+              </div>
+            </Card>
+          </Reveal>
+
+          <Reveal>
+            <Card className="p-6 relative">
+              <div className="absolute top-3 right-3 bg-[#C9A348] text-white text-[9px] font-medium px-2 py-0.5 rounded-full uppercase tracking-wide">Most Popular</div>
+              <h3 className="text-xl font-semibold">The Custom Edit</h3>
+              <p className="text-sm text-neutral-600">Design • starting at $350</p>
+              <ul className="mt-3 text-sm list-disc pl-5 space-y-1">
+                <li>3–5-day handcrafted itinerary</li>
+                <li>Daily route with realistic timing</li>
+                <li>Curated dining + photo-worthy stops</li>
+                <li>Downloadable Google Map pins</li>
+              </ul>
+              <div className="mt-4">
+                <a href="#inquiry">
+                  <Button className="btn-shadow" style={{ background: brand.accent, color: "#fff" }} type="button">
+                    Let’s Plan Together
+                  </Button>
+                </a>
+              </div>
+            </Card>
+          </Reveal>
+
+          <Reveal>
+            <Card className="p-6">
+              <h3 className="text-xl font-semibold">Group Travel</h3>
+              <p className="text-sm text-neutral-600">Friends, birthdays, retreats • starting at $500</p>
+              <ul className="mt-3 text-sm list-disc pl-5 space-y-1">
+                <li>Multi-traveler coordination</li>
+                <li>Rooming & activity alignment</li>
+                <li>Shared itineraries + timelines</li>
+                <li>Payment-friendly planning flow</li>
+              </ul>
+              <div className="mt-4">
+                <a href="#inquiry">
+                  <Button className="btn-shadow" style={{ background: brand.accent, color: "#fff" }} type="button">
+                    Plan a Group Trip
+                  </Button>
+                </a>
+              </div>
+            </Card>
+          </Reveal>
+
+          <Reveal>
+            <Card className="p-6 border-2" style={{ borderColor: brand.accent }}>
+              <h3 className="text-xl font-semibold flex items-center gap-2">
+                The Full Journey <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: brand.primary }}>Concierge</span>
+              </h3>
+              <p className="text-sm text-neutral-600">Peace-of-mind planning • starting at $600</p>
+              <p className="mt-2 text-sm text-neutral-700">For travelers ready to stop stressing and start savoring — your peace pass to effortless travel.</p>
+              <ul className="mt-3 text-sm list-disc pl-5 space-y-1">
+                <li>Everything in The Custom Edit</li>
+                <li>Reservations assistance (where possible)</li>
+                <li>On-trip messaging support</li>
+                <li>Last-minute tweaks handled</li>
+              </ul>
+              <div className="mt-4">
+                <a href="#inquiry">
+                  <Button className="btn-shadow" style={{ background: brand.accent, color: "#fff" }} type="button">
+                    Let’s Plan Together
+                  </Button>
+                </a>
+              </div>
+            </Card>
+          </Reveal>
+        </div>
+      </Section>
+    </div>
+  );
+}
+
+/********************** PHOTOS **********************/
+function LatestPhotos({ photos }: { photos: string[] }) {
+  const display = photos.length ? photos.slice(0, LATEST_LIMIT) : new Array(LATEST_LIMIT).fill(fallbackImg);
+
+  return (
+    <Section id="photos" className="py-12">
+      <Reveal>
+        <h2 className="text-3xl font-semibold mb-6">Latest Photos</h2>
+      </Reveal>
+      <div className="columns-1 sm:columns-2 md:columns-3 gap-4 [column-fill:_balance]">
+        {display.map((src, i) => (
+          <Reveal key={i}>
+            <img
+              src={src}
+              alt={`p-${i}`}
+              className="mb-4 w-full rounded-2xl border shadow-sm hover-zoom"
+              style={{ borderColor: i % 2 === 0 ? brand.primary : brand.accent }}
+              loading="lazy"
+            />
+          </Reveal>
+        ))}
+      </div>
+    </Section>
+  );
+}
+
+/********************** ABOUT **********************/
+function AboutMe({ aboutImg }: { aboutImg?: string }) {
+  return (
+    <div style={{ background: brand.subtle }}>
+      <Section id="about" className="py-16">
+        <div className="relative">
+          <div aria-hidden className="absolute -top-6 -left-4 h-20 w-20 rounded-full" style={{ background: brand.accent, opacity: 0.08 }} />
+
+          <Reveal>
+            <div className="rounded-3xl bg-white border shadow-sm p-8 md:p-10" style={{ borderColor: brand.accent }}>
+              <div className="grid md:grid-cols-3 gap-8 items-center">
+                <div className="md:col-span-1 flex justify-center">
+                  <div className="w-44 h-44 rounded-full overflow-hidden" style={{ border: `4px solid ${brand.primary}`, boxShadow: "0 8px 28px rgba(0,0,0,0.08)" }}>
+                    <img src={aboutImg || fallbackImg} alt="Tyasia — Steal My Itinerary" className="w-full h-full object-cover" />
+                  </div>
+                </div>
+
+                <div className="md:col-span-2">
+                  <h2 className="text-3xl font-semibold tracking-tight" style={{ color: brand.accent }}>About Me</h2>
+                  <div className="mt-2 h-1 w-16 rounded-full" style={{ background: brand.accent, opacity: 0.35 }} />
+                  <p className="mt-5 text-[1.02rem] leading-7 text-neutral-800">
+                    Hey, I’m Tyasia — creator of Steal My Itinerary. What started as a solo trip to see Beyoncé turned into a passport stamped with experiences across <strong>35 countries</strong>.
+                    <br />
+                    <br />
+                    Every itinerary I design is built from real travel thoughtfully curated for travelers who value culture, connection, and a touch of luxury without the fluff.
+                  </p>
+                  <div className="mt-6 flex items-center gap-3">
+                    <span className="inline-block text-xs px-3 py-1 rounded-full" style={{ background: brand.primary }}>
+                      Curated • Considered • Chic
+                    </span>
+                    <div className="flex-1 h-px" style={{ background: brand.accent, opacity: 0.2 }} />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </Reveal>
+        </div>
+      </Section>
+    </div>
+  );
+}
+
+/********************** INQUIRY **********************/
+function QuickInquiry() {
+  return (
+    <Section id="inquiry" className="py-12">
+      <Reveal>
+        <h2 className="text-3xl font-semibold mb-4">Quick inquiry</h2>
+      </Reveal>
+      <Card className="p-5">
+        <form className="grid md:grid-cols-3 gap-4">
+          <input className="border rounded-xl p-3" placeholder="Your name" />
+          <input className="border rounded-xl p-3" placeholder="Email" />
+          <input className="border rounded-xl p-3" placeholder="Destination or dates" />
+          <textarea className="border rounded-xl p-3 md:col-span-3" rows={4} placeholder="Tell me the vibe, budget, and pace" />
+          <div className="md:col-span-3 flex justify-end">
+            <Button className="btn-shadow" style={{ background: brand.accent, color: "#fff" }} type="button">
+              Send
+            </Button>
+          </div>
+        </form>
+      </Card>
+    </Section>
+  );
+}
+
+/********************** PAGE **********************/
+export default function App() {
+  const [latest, setLatest] = useState<string[]>([]);
+  const [tripImgs, setTripImgs] = useState<string[]>([]);
+  const [about, setAbout] = useState<string[]>([]);
+
+  const [status, setStatus] = useState<"idle" | "loading" | "ok" | "error">("idle");
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = async () => {
+    try {
+      setStatus("loading");
+      setError(null);
+
+      const [latestUrls, tripUrls, aboutUrls] = await Promise.all([
+        fetchCloudinaryTagNewestFirst(CLOUDINARY_CLOUD, TAG_LATEST),
+        fetchCloudinaryTagNewestFirst(CLOUDINARY_CLOUD, TAG_TRIPS),
+        fetchCloudinaryTagNewestFirst(CLOUDINARY_CLOUD, TAG_ABOUT),
+      ]);
+
+      setLatest(latestUrls.slice(0, LATEST_LIMIT));
+      setTripImgs(tripUrls.slice(0, TRIPS_LIMIT));
+      setAbout(aboutUrls.slice(0, ABOUT_LIMIT));
+
+      setStatus("ok");
+    } catch (e: any) {
+      setLatest([]);
+      setTripImgs([]);
+      setAbout([]);
+      setStatus("error");
+      setError(e?.message || "Cloudinary tag feed failed.");
+    }
+  };
+
+  useEffect(() => {
+    refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <div className="min-h-screen bg-white text-[15px]" style={{ color: brand.text }}>
+      <GlobalStyles />
+      <EditorialNav />
+
+      {/* Status line so you can verify it’s pulling */}
+      
+
+      {/* Hero — locked to your chosen hero image (upload this photo to Cloudinary and paste URL below) */}
+      <EditorialHero heroImg={HERO_IMAGE_URL} />
+
+      <TripShowcase tripImages={tripImgs} />
+      <FeaturedStays />
+      <Services />
+      <LatestPhotos photos={latest} />
+      <AboutMe aboutImg={about[0]} />
+      <QuickInquiry />
+
+      <div className="mt-16 border-t">
+        <Section className="py-8 text-sm text-neutral-500 flex items-center justify-between">
+          <span>© {new Date().getFullYear()} Steal My Itinerary</span>
+          <a href="#top" className="hover:underline">
+            Back to top
+          </a>
+        </Section>
+      </div>
+    </div>
+  );
+}
+
+/********************** DEV TESTS (non-breaking) **********************/
+(function runDevTests() {
+  try {
+    const out = normalizeBullets(["A\n B", "  C   D  ", null, 42]);
+    console.assert(Array.isArray(out) && out.length === 3, "normalizeBullets returns 3 items");
+    console.assert(out[0] === "A B", "newline collapsed");
+    console.assert(out[1] === "C D", "spaces collapsed");
+    console.assert(out[2] === "42", "non-strings casted");
+
+    console.assert(priceForDays(3) === "$9.99", "3-day pricing");
+    console.assert(priceForDays(4) === "$19.99", "4-day pricing");
+    console.assert(priceForDays(10) === "$29.99", "5+ day pricing");
+
+    const testUrl = cloudinaryAssetUrl("demo", { public_id: "abc/def", format: "jpg", version: 123 });
+    console.assert(testUrl.includes("/v123/"), "asset url includes version");
+    console.assert(cldOptimize(testUrl).includes("/f_auto,q_auto/"), "optimize inserts f_auto,q_auto");
+  } catch {
+    // no-op
+  }
+})();
